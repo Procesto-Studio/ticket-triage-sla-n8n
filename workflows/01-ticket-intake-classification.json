@@ -1,0 +1,651 @@
+{
+  "name": "Tickets · Intake & AI classification (Gmail → Sheets + Telegram)",
+  "description": "Every minute reads new support e-mails, classifies category, priority and owner with AI, logs the ticket with an SLA deadline and notifies the owner.",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "is:unread newer_than:1d -from:me"
+        },
+        "options": {}
+      },
+      "id": "f97debd6-3779-40e6-8e76-a73d7b983114",
+      "name": "Gmail Trigger (every 1m)",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [
+        48,
+        208
+      ],
+      "notes": "Кожну хвилину бере непрочитані листи за добу в інбоксі SlotHub. -from:me відсікає листи, які шле сам workflow (L2 директору)."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "t1",
+              "name": "ticket_id",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "t2",
+              "name": "from_email",
+              "value": "={{ $json.from?.value?.[0]?.address || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "t3",
+              "name": "subject",
+              "value": "={{ $json.subject || '(без теми)' }}",
+              "type": "string"
+            },
+            {
+              "id": "t4",
+              "name": "body",
+              "value": "={{ ($json.text || $json.snippet || '').slice(0, 4000) }}",
+              "type": "string"
+            },
+            {
+              "id": "t5",
+              "name": "created_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "t6",
+              "name": "thread_link",
+              "value": "=https://mail.google.com/mail/u/0/#inbox/{{ $json.threadId }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fb7d7873-b0b7-4dae-a37a-5b944b668018",
+      "name": "Collect Ticket Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        288,
+        208
+      ],
+      "notes": "Плоский об'єкт тікета. Тіло обрізається до 4000 символів — захист бюджету від довгих ланцюжків листів."
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Тікет від клієнта SlotHub:\n\nFrom: {{ $json.from_email }}\nSubject: {{ $json.subject }}\nReceived: {{ $json.created_at }}\nBody:\n{{ $json.body }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "[Prompt not published. To get the full workflow, see README → Get the full workflow.]"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "id": "aa805e5f-28c1-4898-bc1d-ade7ae0359f9",
+      "name": "AI Classifier (Chain of Thought)",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [
+        528,
+        208
+      ],
+      "notes": "Промпт з 5 блоків: роль → контекст SlotHub (категорії, P1–P4, власники, спецправила) → інструкція з 3 вимірами → Chain of Thought → JSON. reasoning іде першим полем, щоб модель спершу міркувала, а потім вирішувала."
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "options": {
+          "responseFormat": "json_object",
+          "temperature": 0.2
+        }
+      },
+      "id": "ccd3f0ca-e539-45af-830a-b1247a7b715b",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        480,
+        432
+      ],
+      "notes": "gpt-4o-mini, temperature 0.2, json_object."
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"reasoning\": \"Віджет запису не працює з 9:00 у всіх 12 філіях, відвідувачі вже скасовують візити — терміновість і вплив максимальні. Клієнт на тарифі Enterprise і пише вдруге, тож спрацьовують правила VIP і повторного звернення. Тому P1, а не P2.\",\n  \"scores\": {\n    \"urgency\": 3,\n    \"impact\": 3,\n    \"context\": 3\n  },\n  \"category\": \"tech\",\n  \"priority\": \"P1\",\n  \"owner\": \"@tech_owner\",\n  \"sla_minutes\": 30,\n  \"summary\": \"У мережі з 12 філій з ранку не працює онлайн-запис.\",\n  \"customer_sentiment\": \"angry\"\n}"
+      },
+      "id": "9ff0709e-66a1-4cd0-9ddc-5e014133d88b",
+      "name": "Structured Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        688,
+        432
+      ],
+      "notes": "Валідує JSON від моделі."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f1",
+              "name": "ticket_id",
+              "value": "={{ $('Collect Ticket Context').item.json.ticket_id }}",
+              "type": "string"
+            },
+            {
+              "id": "f2",
+              "name": "created_at",
+              "value": "={{ $('Collect Ticket Context').item.json.created_at }}",
+              "type": "string"
+            },
+            {
+              "id": "f3",
+              "name": "from_email",
+              "value": "={{ $('Collect Ticket Context').item.json.from_email }}",
+              "type": "string"
+            },
+            {
+              "id": "f4",
+              "name": "subject",
+              "value": "={{ $('Collect Ticket Context').item.json.subject }}",
+              "type": "string"
+            },
+            {
+              "id": "f5",
+              "name": "category",
+              "value": "={{ $json.output.category }}",
+              "type": "string"
+            },
+            {
+              "id": "f6",
+              "name": "priority",
+              "value": "={{ $json.output.priority }}",
+              "type": "string"
+            },
+            {
+              "id": "f7",
+              "name": "owner",
+              "value": "={{ $json.output.category === 'spam' ? 'none' : (($json.output.owner && $json.output.owner !== 'none') ? $json.output.owner : ({tech:'@tech_owner', billing:'@billing_owner', support:'@support_owner', sales:'@sales_owner'})[$json.output.category] || '@team_lead') }}",
+              "type": "string"
+            },
+            {
+              "id": "f8",
+              "name": "sla_minutes",
+              "value": "={{ ({P1:30,P2:120,P3:480,P4:1440})[$json.output.priority] || Number($json.output.sla_minutes) || 480 }}",
+              "type": "number"
+            },
+            {
+              "id": "f9",
+              "name": "sla_deadline",
+              "value": "={{ DateTime.fromISO($('Collect Ticket Context').item.json.created_at).plus({ minutes: ({P1:30,P2:120,P3:480,P4:1440})[$json.output.priority] || Number($json.output.sla_minutes) || 480 }).toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "f10",
+              "name": "status",
+              "value": "={{ $json.output.category === 'spam' ? 'spam' : 'open' }}",
+              "type": "string"
+            },
+            {
+              "id": "f11",
+              "name": "summary",
+              "value": "={{ $json.output.summary }}",
+              "type": "string"
+            },
+            {
+              "id": "f12",
+              "name": "reasoning",
+              "value": "={{ $json.output.reasoning }}",
+              "type": "string"
+            },
+            {
+              "id": "f13",
+              "name": "sentiment",
+              "value": "={{ $json.output.customer_sentiment }}",
+              "type": "string"
+            },
+            {
+              "id": "f14",
+              "name": "thread_link",
+              "value": "={{ $('Collect Ticket Context').item.json.thread_link }}",
+              "type": "string"
+            },
+            {
+              "id": "f15",
+              "name": "scores",
+              "value": "=U{{ $json.output.scores?.urgency ?? '-' }} I{{ $json.output.scores?.impact ?? '-' }} C{{ $json.output.scores?.context ?? '-' }}",
+              "type": "string"
+            },
+            {
+              "id": "f16",
+              "name": "last_escalation_level",
+              "value": "=",
+              "type": "string"
+            },
+            {
+              "id": "f17",
+              "name": "last_director_email_at",
+              "value": "=",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "947f8465-002f-405c-b451-8ee1050f4a40",
+      "name": "Flatten Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        848,
+        208
+      ],
+      "notes": "SLA-хвилини беруться з таблиці пріоритетів (30/120/480/1440), а не з відповіді моделі — так priority і sla_minutes ніколи не розходяться. Spam отримує status=spam і не потрапляє в SLA watcher."
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_TICKETS_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Tickets"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "ticket_id"
+          ],
+          "schema": [
+            {
+              "id": "ticket_id",
+              "displayName": "ticket_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "from_email",
+              "displayName": "from_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "subject",
+              "displayName": "subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "owner",
+              "displayName": "owner",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sla_minutes",
+              "displayName": "sla_minutes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sla_deadline",
+              "displayName": "sla_deadline",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "summary",
+              "displayName": "summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "reasoning",
+              "displayName": "reasoning",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sentiment",
+              "displayName": "sentiment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "thread_link",
+              "displayName": "thread_link",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "scores",
+              "displayName": "scores",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "last_escalation_level",
+              "displayName": "last_escalation_level",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "last_director_email_at",
+              "displayName": "last_director_email_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "f3df5f95-a9fb-40d2-a8f9-d03a409afeaf",
+      "name": "Log → Tickets Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1104,
+        64
+      ],
+      "notes": "Логує ВСІ тікети, включно зі spam (status=spam) — це дає повну картину точності класифікатора. Заголовки в Sheets мають збігатися з назвами полів Flatten Result."
+    },
+    {
+      "parameters": {
+        "operation": "markAsRead",
+        "messageId": "={{ $json.ticket_id }}"
+      },
+      "id": "050b6a1d-27bb-4478-9a3e-eb6de472d6e7",
+      "name": "Gmail: Mark as Read",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1104,
+        208
+      ],
+      "webhookId": "695abf1d-e0cd-40df-a34f-1c78622722c5",
+      "notes": "Гігієна: оброблений лист більше не потрапить у фільтр is:unread — без дублів у Sheets."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "not-spam",
+              "leftValue": "={{ $json.category }}",
+              "rightValue": "spam",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ea6efae3-d53a-4ce0-8f86-48adb7eedd2d",
+      "name": "Not spam?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        352
+      ],
+      "notes": "Spam логується, але команду не турбує."
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ ({P1:'🔴',P2:'🟠',P3:'🟡',P4:'⚪'})[$json.priority] || '⚪' }} <b>Новий тікет {{ $json.priority }} · {{ $json.category }}</b>\n\n👤 Власник: {{ String($json.owner ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}\n⏱ SLA: {{ $json.sla_minutes }} хв (до {{ DateTime.fromISO($json.sla_deadline).setZone('Europe/Kyiv').toFormat('dd.MM HH:mm') }})\n🌡 Sentiment: {{ $json.sentiment }} · Бали: {{ $json.scores }}\n\n✉️ Тема: {{ String($json.subject ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}\nВід: {{ String($json.from_email ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}\n\n📝 Що сталось: {{ String($json.summary ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}\n\n🧠 Чому такий пріоритет:\n{{ String($json.reasoning ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}\n\n🔗 {{ $json.thread_link }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "71411a00-ff8c-4044-8e32-fe65d084800f",
+      "name": "Telegram: Notify Owner",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1344,
+        352
+      ],
+      "webhookId": "003c1ada-d513-4dcc-8a7f-dc056a64cb27",
+      "notes": "Повідомлення в групу «SlotHub · CX Tickets» з Chain of Thought обґрунтуванням — менеджер бачить, чому AI поставив саме цей пріоритет. parse_mode=HTML; текст з листів екранується (&, <, >), а _ у @handle більше не ламає Markdown."
+    },
+    {
+      "parameters": {
+        "content": "## флоу 1 · Вхід тікета\nGmail → контекст → AI Classifier (CoT) → Sheets + Telegram власнику",
+        "height": 120,
+        "width": 520,
+        "color": 4
+      },
+      "id": "1af37914-769b-4270-b8c3-3620b7335072",
+      "name": "Note Intake",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger (every 1m)": {
+      "main": [
+        [
+          {
+            "node": "Collect Ticket Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Ticket Context": {
+      "main": [
+        [
+          {
+            "node": "AI Classifier (Chain of Thought)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Classifier (Chain of Thought)": {
+      "main": [
+        [
+          {
+            "node": "Flatten Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Classifier (Chain of Thought)",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Classifier (Chain of Thought)",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flatten Result": {
+      "main": [
+        [
+          {
+            "node": "Log → Tickets Sheet",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gmail: Mark as Read",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Not spam?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Not spam?": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Notify Owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

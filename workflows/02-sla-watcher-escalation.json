@@ -1,0 +1,544 @@
+{
+  "name": "Tickets · SLA watcher & 3-level escalation",
+  "description": "Every 5 minutes checks open tickets; after an SLA breach escalates to the owner, the team lead, then a director by e-mail.",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "31125a82-cc8e-4e75-b382-daa54285664b",
+      "name": "SLA Watcher (every 5m)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        1616,
+        688
+      ],
+      "notes": "Раз на 5 хвилин перевіряє відкриті тікети."
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_TICKETS_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Tickets"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "status",
+              "lookupValue": "open"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "651c871d-4b76-4362-8d74-23607550dcc1",
+      "name": "Read Open Tickets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1856,
+        688
+      ],
+      "alwaysOutputData": false,
+      "notes": "Тільки status=open. Щоб закрити тікет — змініть status на closed."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "breached",
+              "leftValue": "={{ DateTime.fromISO(String($json.sla_deadline)).isValid && DateTime.fromISO(String($json.sla_deadline)) < $now }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "73c5f180-f19c-48f8-ab71-daaafadd9b08",
+      "name": "SLA Breached?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2320,
+        688
+      ],
+      "notes": "Breach = sla_deadline (ISO 8601) уже минув."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1",
+              "name": "minutes_overdue",
+              "value": "={{ Math.round(($now.toMillis() - DateTime.fromISO(String($json.sla_deadline)).toMillis()) / 60000) }}",
+              "type": "number"
+            },
+            {
+              "id": "e2",
+              "name": "escalation_level",
+              "value": "={{ (($now.toMillis() - DateTime.fromISO(String($json.sla_deadline)).toMillis()) / 60000) >= 60 ? 2 : ((($now.toMillis() - DateTime.fromISO(String($json.sla_deadline)).toMillis()) / 60000) >= 30 ? 1 : 0) }}",
+              "type": "number"
+            },
+            {
+              "id": "e3",
+              "name": "prev_level",
+              "value": "={{ ($json.last_escalation_level === '' || $json.last_escalation_level === undefined || $json.last_escalation_level === null) ? -1 : Number($json.last_escalation_level) }}",
+              "type": "number"
+            },
+            {
+              "id": "e4",
+              "name": "hours_since_director",
+              "type": "number",
+              "value": "={{ DateTime.fromISO(String($json.last_director_email_at || '')).isValid ? Math.floor(($now.toMillis() - DateTime.fromISO(String($json.last_director_email_at)).toMillis()) / 3600000) : 9999 }}"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "9df15909-8adf-4e98-b39f-b07203c4c82a",
+      "name": "Compute Escalation Level",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2544,
+        688
+      ],
+      "notes": "L0: 0–30 хв після breach → власник. L1: 30–60 хв → тімлід. L2: 60+ хв → директор."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "new-level",
+              "leftValue": "={{ $json.escalation_level }}",
+              "rightValue": "={{ $json.prev_level }}",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "id": "director-daily",
+              "leftValue": "={{ $json.escalation_level === 2 && $json.hours_since_director >= 24 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "f91ebba8-c0d8-4b97-a14e-db9520db87d4",
+      "name": "New escalation level?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2752,
+        688
+      ],
+      "notes": "L0 і L1 — один раз. L2 директору — не частіше 1 разу на 24 год на тікет."
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_TICKETS_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Tickets"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ticket_id": "={{ $json.ticket_id }}",
+            "last_escalation_level": "={{ $json.escalation_level }}",
+            "last_director_email_at": "={{ $json.escalation_level === 2 ? $now.toISO() : ($json.last_director_email_at || '') }}"
+          },
+          "matchingColumns": [
+            "ticket_id"
+          ],
+          "schema": [
+            {
+              "id": "ticket_id",
+              "displayName": "ticket_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "last_escalation_level",
+              "displayName": "last_escalation_level",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "last_director_email_at",
+              "displayName": "last_director_email_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "4741d18b-6510-4b38-9135-ddc186b36029",
+      "name": "Save Escalation Level",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2992,
+        560
+      ],
+      "notes": "Пише ЛИШЕ last_escalation_level і last_director_email_at у рядок з тим самим ticket_id."
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "lvl0",
+                    "leftValue": "={{ $json.escalation_level }}",
+                    "rightValue": 0,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Level 0 — Owner"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "lvl1",
+                    "leftValue": "={{ $json.escalation_level }}",
+                    "rightValue": 1,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Level 1 — TL"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "lvl2",
+                    "leftValue": "={{ $json.escalation_level }}",
+                    "rightValue": 2,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Level 2 — Director"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dfa36d8f-5ce2-41bb-980f-c5660144dbe3",
+      "name": "Switch by Level",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        2992,
+        736
+      ],
+      "notes": "3 виходи: Owner / Team Lead / Director."
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=⚠️ <b>L0 · Нагадування — SLA прострочено</b>\n\n{{ String($json.owner ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}, тікет {{ $json.priority }} ({{ $json.category }}) прострочено на {{ $json.minutes_overdue }} хв.\n\n✉️ Тема: {{ String($json.subject ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}\n📝 Резюме: {{ String($json.summary ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}\n\n👉 Візьміть у роботу: {{ $json.thread_link }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "0919dec9-d84c-44ec-ad68-de8dbfc7eae0",
+      "name": "Telegram: Remind Owner (L0)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3264,
+        624
+      ],
+      "webhookId": "698c783d-7692-48b3-adae-0fe998a959c1",
+      "notes": "L0 — м'яке нагадування власнику в робочій групі."
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=🚨 <b>L1 · Ескалація Head of Customer Care</b>\n\nТікет {{ $json.priority }} прострочено на {{ $json.minutes_overdue }} хв. Власник {{ String($json.owner ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }} не взяв його в роботу.\n\n✉️ Тема: {{ String($json.subject ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}\nВід: {{ String($json.from_email ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}\n🌡 Sentiment: {{ $json.sentiment }}\n📝 Резюме: {{ String($json.summary ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}\n🧠 Reasoning: {{ String($json.reasoning ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}\n\n👉 Допомогти або перепризначити: {{ $json.thread_link }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "3bc3ddb1-ed14-4382-9a92-1dbd76858549",
+      "name": "Telegram: Notify TL (L1)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3264,
+        768
+      ],
+      "webhookId": "0df28c53-8cb0-462d-86c5-2e6a6b1df9e9",
+      "notes": "L1 — тімлід отримує контекст і вирішує: допомогти чи перепризначити."
+    },
+    {
+      "parameters": {
+        "sendTo": "director@example.com",
+        "subject": "=[SlotHub · ESCALATION L2] {{ $json.priority }} — {{ $json.subject }}",
+        "message": "=<h2>Ескалація L2 — COO</h2>\n<p>Тікет <strong>{{ $json.priority }}</strong> прострочено на <strong>{{ $json.minutes_overdue }} хв</strong>. Власник {{ $json.owner }} і Head of Customer Care не закрили його.</p>\n<h3>Контекст</h3>\n<ul>\n<li><strong>Категорія:</strong> {{ $json.category }}</li>\n<li><strong>Sentiment:</strong> {{ $json.sentiment }}</li>\n<li><strong>Від:</strong> {{ $json.from_email }}</li>\n<li><strong>Створено:</strong> {{ $json.created_at }}</li>\n<li><strong>SLA deadline:</strong> {{ $json.sla_deadline }}</li>\n</ul>\n<h3>Резюме</h3>\n<p>{{ $json.summary }}</p>\n<h3>AI reasoning</h3>\n<p><em>{{ $json.reasoning }}</em></p>\n<p><a href=\"{{ $json.thread_link }}\">→ Відкрити thread</a></p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "0fc6fecf-0359-4f82-946c-561de524a08f",
+      "name": "Email: Director (L2)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        3264,
+        896
+      ],
+      "webhookId": "97de0db1-dc71-4326-aa48-d50376353d44",
+      "notes": "L2 — лист COO з повним контекстом для управлінського рішення."
+    },
+    {
+      "parameters": {
+        "content": "## флоу 2 · SLA Watcher\n open-тікети →  L0 власник / L1 тімлід / L2 COO (L0/L1 — один раз, L2 — раз на добу)",
+        "height": 120,
+        "width": 620,
+        "color": 3
+      },
+      "id": "4aec7007-43f9-468a-8a48-3a4832284eba",
+      "name": "Note SLA",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1568,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "compare": "selectedFields",
+        "fieldsToCompare": "ticket_id",
+        "options": {}
+      },
+      "id": "7a618f31-edbc-4c94-a645-06a59fc744f7",
+      "name": "Remove Duplicate Tickets",
+      "type": "n8n-nodes-base.removeDuplicates",
+      "typeVersion": 1.1,
+      "position": [
+        2080,
+        688
+      ],
+      "notes": "Якщо в таблиці випадково є два рядки з однаковим ticket_id — лишає перший. Саме в нього Save Escalation Level записує рівень, тож дубль не спричинить повторних ескалацій."
+    }
+  ],
+  "connections": {
+    "SLA Watcher (every 5m)": {
+      "main": [
+        [
+          {
+            "node": "Read Open Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Open Tickets": {
+      "main": [
+        [
+          {
+            "node": "Remove Duplicate Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SLA Breached?": {
+      "main": [
+        [
+          {
+            "node": "Compute Escalation Level",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Escalation Level": {
+      "main": [
+        [
+          {
+            "node": "New escalation level?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New escalation level?": {
+      "main": [
+        [
+          {
+            "node": "Save Escalation Level",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Switch by Level",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch by Level": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Remind Owner (L0)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram: Notify TL (L1)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email: Director (L2)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove Duplicate Tickets": {
+      "main": [
+        [
+          {
+            "node": "SLA Breached?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
