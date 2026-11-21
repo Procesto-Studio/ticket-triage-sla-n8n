@@ -76,7 +76,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        288,
+        298,
         208
       ],
       "notes": "Плоский об'єкт тікета. Тіло обрізається до 4000 символів — захист бюджету від довгих ланцюжків листів."
@@ -98,7 +98,7 @@
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 1.6,
       "position": [
-        528,
+        596,
         208
       ],
       "notes": "Промпт з 5 блоків: роль → контекст SlotHub (категорії, P1–P4, власники, спецправила) → інструкція з 3 вимірами → Chain of Thought → JSON. reasoning іде першим полем, щоб модель спершу міркувала, а потім вирішувала."
@@ -116,7 +116,7 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1,
       "position": [
-        480,
+        548,
         432
       ],
       "notes": "gpt-4o-mini, temperature 0.2, json_object."
@@ -130,7 +130,7 @@
       "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
       "typeVersion": 1.2,
       "position": [
-        688,
+        756,
         432
       ],
       "notes": "Валідує JSON від моделі."
@@ -250,7 +250,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        848,
+        976,
         208
       ],
       "notes": "SLA-хвилини беруться з таблиці пріоритетів (30/120/480/1440), а не з відповіді моделі — так priority і sla_minutes ніколи не розходяться. Spam отримує status=spam і не потрапляє в SLA watcher."
@@ -457,7 +457,7 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [
-        1104,
+        1232,
         64
       ],
       "notes": "Логує ВСІ тікети, включно зі spam (status=spam) — це дає повну картину точності класифікатора. Заголовки в Sheets мають збігатися з назвами полів Flatten Result."
@@ -472,7 +472,7 @@
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
       "position": [
-        1104,
+        1232,
         208
       ],
       "webhookId": "695abf1d-e0cd-40df-a34f-1c78622722c5",
@@ -507,7 +507,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        1104,
+        1232,
         352
       ],
       "notes": "Spam логується, але команду не турбує."
@@ -527,7 +527,7 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        1344,
+        1472,
         352
       ],
       "webhookId": "003c1ada-d513-4dcc-8a7f-dc056a64cb27",
@@ -535,18 +535,98 @@
     },
     {
       "parameters": {
-        "content": "## флоу 1 · Вхід тікета\nGmail → контекст → AI Classifier (CoT) → Sheets + Telegram власнику",
-        "height": 120,
-        "width": 520,
+        "content": "### New e-mail\nPolls every minute for unread e-mails from the last day, excluding your own. The e-mail is marked as read later, so it is not picked up twice.",
+        "height": 528,
+        "width": 230,
         "color": 4
       },
-      "id": "1af37914-769b-4270-b8c3-3620b7335072",
-      "name": "Note Intake",
+      "id": "fd908fb2-ab10-49a6-be81-1b4b651523ac",
+      "name": "Note: Gmail Trigger (every 1m)",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        0,
-        0
+        -2,
+        -170
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Ticket context\nSender, subject, body (first 4000 characters), time and a link to the Gmail thread.",
+        "height": 528,
+        "width": 230,
+        "color": 4
+      },
+      "id": "66b89379-22c9-4bad-a1e9-62df5db476b1",
+      "name": "Note: Collect Ticket Context",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        248,
+        -170
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### AI classification\nThe agent reasons step by step, scores urgency, impact and context, then returns category, priority (P1–P4), owner, summary, customer sentiment and its reasoning. The output parser enforces a fixed JSON shape, so the next nodes never get free text.\n\nPrompt not published.",
+        "height": 752,
+        "width": 408,
+        "color": 4
+      },
+      "id": "fd2e2d30-9b1d-4e8c-b184-342d712009a0",
+      "name": "Note: AI Classifier (Chain of Thought)",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        498,
+        -170
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### One flat row\nJoins context and AI result. Sets the SLA by priority (P1 30 min, P2 2 h, P3 8 h, P4 24 h) and a fallback owner per category.",
+        "height": 528,
+        "width": 230,
+        "color": 4
+      },
+      "id": "8707c6e4-a639-494e-a769-79caad0ea313",
+      "name": "Note: Flatten Result",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        926,
+        -170
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Log, mark, alert\nEvery ticket goes to the sheet (the SLA watcher works from it) and is marked as read. Spam stops here; real tickets alert in Telegram with priority, owner, SLA deadline, summary and the reason for the priority.",
+        "height": 672,
+        "width": 440,
+        "color": 4
+      },
+      "id": "2798317f-79fa-4569-ba05-8b831166f645",
+      "name": "Note: Log → Tickets Sheet",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1182,
+        -170
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Ticket intake: AI classification, log and alert\n\n### How it works\n1. **Gmail Trigger** checks the support inbox every minute for new e-mails.\n2. The ticket context (sender, subject, body, thread link) is collected.\n3. An **AI classifier** with step-by-step reasoning scores urgency, impact and context and returns category, priority, owner, summary and sentiment as structured JSON.\n4. Every ticket is logged to **Google Sheets** and marked as read; non-spam tickets alert the owner in **Telegram**.\n\nThe second workflow (SLA watcher) reads the same sheet and escalates overdue tickets.\n\n### Setup\n- Connect Gmail, OpenAI, Google Sheets and Telegram credentials.\n- Create the Tickets sheet with the columns from the README and select it in **Log → Tickets Sheet**.\n- Set your Telegram chat ID in **Telegram: Notify Owner**.\n\nThe classification prompt is not published in this showcase.",
+        "height": 771,
+        "width": 520,
+        "color": 1
+      },
+      "id": "fd3a9eb1-a3bf-4491-ac1c-7f9f1a504a16",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -562,
+        -170
       ]
     }
   ],

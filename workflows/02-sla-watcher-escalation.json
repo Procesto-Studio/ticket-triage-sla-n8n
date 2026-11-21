@@ -50,7 +50,7 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [
-        1856,
+        1866,
         688
       ],
       "alwaysOutputData": false,
@@ -86,7 +86,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        2320,
+        2330,
         688
       ],
       "notes": "Breach = sla_deadline (ISO 8601) уже минув."
@@ -129,7 +129,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        2544,
+        2554,
         688
       ],
       "notes": "L0: 0–30 хв після breach → власник. L1: 30–60 хв → тімлід. L2: 60+ хв → директор."
@@ -173,7 +173,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        2752,
+        2774,
         688
       ],
       "notes": "L0 і L1 — один раз. L2 директору — не частіше 1 разу на 24 год на тікет."
@@ -244,7 +244,7 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [
-        2992,
+        3024,
         560
       ],
       "notes": "Пише ЛИШЕ last_escalation_level і last_director_email_at у рядок з тим самим ticket_id."
@@ -334,7 +334,7 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3,
       "position": [
-        2992,
+        3024,
         736
       ],
       "notes": "3 виходи: Owner / Team Lead / Director."
@@ -354,7 +354,7 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        3264,
+        3296,
         624
       ],
       "webhookId": "698c783d-7692-48b3-adae-0fe998a959c1",
@@ -375,7 +375,7 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        3264,
+        3296,
         768
       ],
       "webhookId": "0df28c53-8cb0-462d-86c5-2e6a6b1df9e9",
@@ -383,7 +383,7 @@
     },
     {
       "parameters": {
-        "sendTo": "director@example.com",
+        "sendTo": "YOUR_DIRECTOR_EMAIL",
         "subject": "=[SlotHub · ESCALATION L2] {{ $json.priority }} — {{ $json.subject }}",
         "message": "=<h2>Ескалація L2 — COO</h2>\n<p>Тікет <strong>{{ $json.priority }}</strong> прострочено на <strong>{{ $json.minutes_overdue }} хв</strong>. Власник {{ $json.owner }} і Head of Customer Care не закрили його.</p>\n<h3>Контекст</h3>\n<ul>\n<li><strong>Категорія:</strong> {{ $json.category }}</li>\n<li><strong>Sentiment:</strong> {{ $json.sentiment }}</li>\n<li><strong>Від:</strong> {{ $json.from_email }}</li>\n<li><strong>Створено:</strong> {{ $json.created_at }}</li>\n<li><strong>SLA deadline:</strong> {{ $json.sla_deadline }}</li>\n</ul>\n<h3>Резюме</h3>\n<p>{{ $json.summary }}</p>\n<h3>AI reasoning</h3>\n<p><em>{{ $json.reasoning }}</em></p>\n<p><a href=\"{{ $json.thread_link }}\">→ Відкрити thread</a></p>",
         "options": {
@@ -395,27 +395,11 @@
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
       "position": [
-        3264,
+        3296,
         896
       ],
       "webhookId": "97de0db1-dc71-4326-aa48-d50376353d44",
       "notes": "L2 — лист COO з повним контекстом для управлінського рішення."
-    },
-    {
-      "parameters": {
-        "content": "## флоу 2 · SLA Watcher\n open-тікети →  L0 власник / L1 тімлід / L2 COO (L0/L1 — один раз, L2 — раз на добу)",
-        "height": 120,
-        "width": 620,
-        "color": 3
-      },
-      "id": "4aec7007-43f9-468a-8a48-3a4832284eba",
-      "name": "Note SLA",
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
-      "position": [
-        1568,
-        496
-      ]
     },
     {
       "parameters": {
@@ -428,10 +412,122 @@
       "type": "n8n-nodes-base.removeDuplicates",
       "typeVersion": 1.1,
       "position": [
-        2080,
+        2090,
         688
       ],
       "notes": "Якщо в таблиці випадково є два рядки з однаковим ticket_id — лишає перший. Саме в нього Save Escalation Level записує рівень, тож дубль не спричинить повторних ескалацій."
+    },
+    {
+      "parameters": {
+        "content": "### Every 5 minutes\nShort interval so a breach is noticed within minutes.",
+        "height": 512,
+        "width": 230,
+        "color": 4
+      },
+      "id": "5cfdfef5-df21-485b-bd17-5b74f4dae797",
+      "name": "Note: SLA Watcher (every 5m)",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1566,
+        326
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Open tickets\nReads rows with status `open` and removes duplicates by ticket ID.",
+        "height": 512,
+        "width": 424,
+        "color": 4
+      },
+      "id": "0acad09e-eed1-4ad7-a3ee-23d4ac1ef339",
+      "name": "Note: Read Open Tickets",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1816,
+        326
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Overdue?\nCompares the SLA deadline with now. For overdue tickets calculates minutes overdue, the escalation level (0 / 1 / 2) and when the director was last e-mailed.",
+        "height": 512,
+        "width": 424,
+        "color": 4
+      },
+      "id": "f1f4c974-721e-4cde-96d7-b9ca12d4d16a",
+      "name": "Note: SLA Breached?",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2280,
+        326
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Only new levels\nContinues only when the level is higher than the saved one (or the daily director reminder is due). This prevents repeat alerts every 5 minutes.",
+        "height": 512,
+        "width": 230,
+        "color": 4
+      },
+      "id": "27ac35ee-00d3-43e0-813c-094027ce6ad1",
+      "name": "Note: New escalation level?",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2724,
+        326
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Save and route\nWrites the new level and time back to the sheet, then routes the ticket by level.",
+        "height": 560,
+        "width": 230,
+        "color": 4
+      },
+      "id": "94adddc9-2387-42fb-8252-375e1e7eebec",
+      "name": "Note: Save Escalation Level",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2974,
+        326
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Notify\nL0: owner in Telegram. L1: team lead in Telegram. L2: director by e-mail, at most once a day.",
+        "height": 720,
+        "width": 230,
+        "color": 4
+      },
+      "id": "9d914815-b0c6-484c-ab9a-8a1ee20a082f",
+      "name": "Note: Telegram: Remind Owner (L0)",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3246,
+        326
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## SLA watcher: escalate overdue tickets\n\n### How it works\nEvery 5 minutes the workflow reads open tickets from the Tickets sheet and checks their SLA deadline.\n- **Level 0** (overdue): reminder to the ticket owner.\n- **Level 1** (30+ min overdue): Telegram message to the team lead.\n- **Level 2** (60+ min overdue): e-mail to the director, at most once a day.\n\nThe current level is saved back to the sheet, so each level fires only once.\n\n### Setup\n- Use the same Tickets sheet as the intake workflow (columns in the README).\n- Connect Google Sheets, Telegram and Gmail credentials.\n- Set chat IDs and the director's e-mail in the three notification nodes.\n- Adjust the 30 / 60 minute thresholds in **Compute Escalation Level**.",
+        "height": 756,
+        "width": 520,
+        "color": 1
+      },
+      "id": "168e2eab-d8d2-41be-bcf2-9553fa472a87",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1006,
+        326
+      ]
     }
   ],
   "connections": {
